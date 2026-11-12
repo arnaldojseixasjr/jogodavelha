@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Memory Core Game — Quebra-Gelo de Arquitetura de Software</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;800&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg-900: #0a0f1c;
+    --bg-800: #111827;
+    --bg-700: #1a2234;
+    --bg-600: #232d44;
+    --line: #2b3650;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --cyan: #22d3ee;
+    --green: #34d399;
+    --blue: #3b82f6;
+    --amber: #fbbf24;
+    --red: #f87171;
+  }
+
+  * { -webkit-tap-highlight-color: transparent; }
+
+  html, body {
+    background:
+      radial-gradient(1200px 600px at 10% -10%, rgba(34,211,238,0.08), transparent 60%),
+      radial-gradient(1000px 500px at 100% 0%, rgba(52,211,153,0.07), transparent 55%),
+      linear-gradient(180deg, #0a0f1c 0%, #0b1120 100%);
+    color: var(--text);
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    min-height: 100vh;
+  }
+
+  .mono { font-family: 'JetBrains Mono', monospace; }
+
+  /* Grade de fundo tipo blueprint */
+  .blueprint::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(34,211,238,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(34,211,238,0.04) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+    mask-image: radial-gradient(circle at center, black 30%, transparent 80%);
+  }
+
+  /* Carta 3D */
+  .card {
+    perspective: 1000px;
+    cursor: pointer;
+    aspect-ratio: 3 / 4;
+  }
+  .card-inner {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    transition: transform 0.5s cubic-bezier(0.4, 0.0, 0.2, 1);
+    transform-style: preserve-3d;
+  }
+  .card.flipped .card-inner,
+  .card.matched .card-inner,
+  .card.hinted .card-inner {
+    transform: rotateY(180deg);
+  }
+
+  .card-face {
+    position: absolute;
+    inset: 0;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 8px;
+    overflow: hidden;
+  }
+
+  /* Verso da carta (costas) */
+  .card-back {
+    background:
+      linear-gradient(135deg, #1a2234 0%, #111827 60%, #0a0f1c 100%);
+    border: 1px solid var(--line);
+    box-shadow: 0 4px 14px rgba(0,0,0,0.4), inset 0 0 0 1px rgba(34,211,238,0.05);
+    transition: all 0.2s ease;
+  }
+  .card-back::before {
+    content: "";
+    position: absolute;
+    inset: 8px;
+    border: 1px dashed rgba(34,211,238,0.25);
+    border-radius: 8px;
+  }
+  .card-back .logo {
+    position: relative;
+    z-index: 1;
+    color: rgba(34,211,238,0.55);
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 800;
+    font-size: clamp(1.2rem, 2vw, 1.8rem);
+    letter-spacing: -2px;
+  }
+  .card-back .logo span { color: rgba(52,211,153,0.55); }
+
+  /* Frente da carta (termo) */
+  .card-front {
+    background: linear-gradient(160deg, #1f2a44 0%, #16213a 100%);
+    border: 1px solid rgba(34,211,238,0.35);
+    transform: rotateY(180deg);
+    color: #e2e8f0;
+    font-weight: 700;
+    font-size: clamp(0.72rem, 1.15vw, 1rem);
+    line-height: 1.15;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(34,211,238,0.1);
+    flex-direction: column;
+    gap: 6px;
+  }
+  .card-front .tag {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.55rem;
+    letter-spacing: 2px;
+    color: var(--cyan);
+    opacity: 0.7;
+    text-transform: uppercase;
+  }
+
+  .card:hover:not(.flipped):not(.matched):not(.hinted) .card-back {
+    border-color: var(--cyan);
+    box-shadow: 0 6px 22px rgba(34,211,238,0.25), inset 0 0 0 1px rgba(34,211,238,0.2);
+    transform: translateY(-2px);
+  }
+
+  .card.matched .card-front {
+    background: linear-gradient(160deg, #0f3a2e 0%, #0a2a22 100%);
+    border-color: var(--green);
+    box-shadow: 0 0 0 1px var(--green), 0 0 22px rgba(52,211,153,0.4);
+    color: #d1fae5;
+  }
+  .card.matched .card-front .tag { color: var(--green); }
+  .card.matched { cursor: default; }
+
+  .card.hinted .card-front {
+    border-color: var(--amber);
+    box-shadow: 0 0 0 1px var(--amber), 0 0 22px rgba(251,191,36,0.45);
+    animation: pulse-hint 0.9s ease-in-out infinite;
+  }
+  @keyframes pulse-hint {
+    0%, 100% { box-shadow: 0 0 0 1px var(--amber), 0 0 18px rgba(251,191,36,0.35); }
+    50% { box-shadow: 0 0 0 2px var(--amber), 0 0 30px rgba(251,191,36,0.65); }
+  }
+
+  .card.shake .card-inner { animation: shake 0.45s ease; }
+  @keyframes shake {
+    0%, 100% { transform: rotateY(180deg) translateX(0); }
+    25% { transform: rotateY(180deg) translateX(-6px); }
+    75% { transform: rotateY(180deg) translateX(6px); }
+  }
+
+  /* Stats pill */
+  .stat-pill {
+    background: linear-gradient(180deg, #1a2234 0%, #111827 100%);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    transition: border-color 0.2s ease;
+  }
+  .stat-pill:hover { border-color: rgba(34,211,238,0.4); }
+  .stat-value { font-family: 'JetBrains Mono', monospace; }
+
+  /* Botões */
+  .btn-primary {
+    background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);
+    color: #04141a;
+    font-weight: 700;
+    box-shadow: 0 4px 14px rgba(34,211,238,0.3), inset 0 1px 0 rgba(255,255,255,0.2);
+    transition: all 0.2s ease;
+  }
+  .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(34,211,238,0.45); }
+  .btn-primary:active { transform: translateY(0); }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+  .btn-hint {
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+    color: #1a1206;
+    font-weight: 700;
+    box-shadow: 0 4px 14px rgba(251,191,36,0.3), inset 0 1px 0 rgba(255,255,255,0.2);
+    transition: all 0.2s ease;
+  }
+  .btn-hint:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(251,191,36,0.5); }
+  .btn-hint:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* Banner de dica */
+  #hintBanner {
+    transition: opacity 0.3s ease, transform 0.3s ease;
+  }
+  #hintBanner.hidden-banner {
+    opacity: 0;
+    transform: translateY(-10px);
+    pointer-events: none;
+  }
+
+  /* Modal de vitória */
+  .modal-backdrop {
+    background: rgba(5, 10, 20, 0.78);
+    backdrop-filter: blur(6px);
+  }
+  .modal-card {
+    background: linear-gradient(160deg, #16213a 0%, #0c1326 100%);
+    border: 1px solid rgba(34,211,238,0.35);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.6), 0 0 0 1px rgba(52,211,153,0.2), 0 0 60px rgba(34,211,238,0.15);
+  }
+
+  /* Confete */
+  .confetti {
+    position: fixed;
+    width: 10px;
+    height: 14px;
+    top: -20px;
+    z-index: 60;
+    pointer-events: none;
+    will-change: transform;
+    border-radius: 2px;
+  }
+  @keyframes fall {
+    0% { transform: translateY(0) rotateZ(0deg); opacity: 1; }
+    100% { transform: translateY(105vh) rotateZ(720deg); opacity: 0.9; }
+  }
+
+  /* Pulse do título */
+  .title-glow {
+    text-shadow: 0 0 30px rgba(34,211,238,0.25);
+  }
+
+  /* Animação de entrada das cartas */
+  @keyframes pop-in {
+    0% { opacity: 0; transform: scale(0.7) translateY(10px); }
+    100% { opacity: 1; transform: scale(1) translateY(0); }
+  }
+  .card { animation: pop-in 0.45s ease backwards; }
+
+  /* Toast */
+  #toast {
+    transition: opacity 0.3s ease, transform 0.3s ease;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  #toast.hide { opacity: 0; transform: translateX(-50%) translateY(20px); }
+
+  /* Scrollbar discreta */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: #0a0f1c; }
+  ::-webkit-scrollbar-thumb { background: #2b3650; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: #3b82f6; }
+</style>
+</head>
+<body class="blueprint">
+
+<div class="relative z-10 max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
+
+  <!-- Cabeçalho -->
+  <header class="text-center mb-6 sm:mb-8">
+    <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-cyan-500/30 bg-cyan-500/5 mb-3">
+      <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+      <span class="text-xs mono tracking-widest text-cyan-300 uppercase">Arquitetura de Software • Quebra-Gelo</span>
+    </div>
+    <h1 class="text-3xl sm:text-5xl font-extrabold title-glow tracking-tight">
+      <span class="text-white">Memory</span>
+      <span class="bg-gradient-to-r from-cyan-400 to-emerald-400 bg-clip-text text-transparent">Core</span>
+      <span class="text-white">Game</span>
+    </h1>
+    <p class="text-slate-400 mt-2 text-sm sm:text-base max-w-2xl mx-auto">
+      Encontre os <span class="text-cyan-300 font-semibold">10 pares idênticos</span> de conceitos de arquitetura de software.
+      Cada clique vira uma carta — use a memória e a lógica para conectar os termos equivalentes.
+    </p>
+  </header>
+
+  <!-- Painel de Controle -->
+  <section class="mb-5">
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mb-3">
+      <div class="stat-pill p-3 sm:p-4">
+        <div class="text-[10px] sm:text-xs uppercase tracking-widest text-slate-400 mono">⏱ Tempo</div>
+        <div id="timer" class="stat-value text-xl sm:text-2xl font-bold text-cyan-300 mt-1">00:00</div>
+      </div>
+      <div class="stat-pill p-3 sm:p-4">
+        <div class="text-[10px] sm:text-xs uppercase tracking-widest text-slate-400 mono">🔄 Tentativas</div>
+        <div id="attempts" class="stat-value text-xl sm:text-2xl font-bold text-white mt-1">0</div>
+      </div>
+      <div class="stat-pill p-3 sm:p-4">
+        <div class="text-[10px] sm:text-xs uppercase tracking-widest text-slate-400 mono">✓ Pares</div>
+        <div class="stat-value text-xl sm:text-2xl font-bold text-emerald-400 mt-1"><span id="pairsFound">0</span><span class="text-slate-500 text-base"> / 10</span></div>
+      </div>
+      <div class="stat-pill p-3 sm:p-4">
+        <div class="text-[10px] sm:text-xs uppercase tracking-widest text-slate-400 mono">💡 Dicas</div>
+        <div class="stat-value text-xl sm:text-2xl font-bold text-amber-400 mt-1"><span id="hintsLeft">3</span><span class="text-slate-500 text-base"> / 3</span></div>
+      </div>
+    </div>
+
+    <div class="flex flex-wrap items-center justify-center gap-3">
+      <button id="startBtn" class="btn-primary px-6 py-3 rounded-xl text-sm sm:text-base flex items-center gap-2">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+        <span id="startBtnLabel">Iniciar Jogo</span>
+      </button>
+      <button id="hintBtn" class="btn-hint px-5 py-3 rounded-xl text-sm sm:text-base flex items-center gap-2" disabled>
+        <span class="text-lg">💡</span>
+        <span>Dica Relâmpago</span>
+      </button>
+    </div>
+  </section>
+
+  <!-- Banner de Dica -->
+  <div id="hintBanner" class="hidden-banner mb-4 mx-auto max-w-3xl px-4 py-3 rounded-xl border border-amber-400/50 bg-amber-400/10 text-amber-200 text-sm sm:text-base text-center">
+    <span class="mono">⚡ Dica:</span> <span id="hintText">—</span>
+  </div>
+
+  <!-- Tabuleiro -->
+  <section class="mx-auto">
+    <div id="board" class="grid grid-cols-4 sm:grid-cols-5 gap-2 sm:gap-3 max-w-3xl mx-auto"></div>
+  </section>
+
+  <!-- Rodapé informativo -->
+  <footer class="mt-8 text-center text-xs text-slate-500 mono">
+    <p>OutSystems • Arquitetura Canvas • BPT • Jogo educacional para sala de aula</p>
+  </footer>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="hide fixed bottom-6 left-1/2 -translate-x-1/2 px-5 py-3 rounded-xl bg-slate-800 border border-slate-600 text-slate-100 text-sm shadow-2xl z-50"></div>
+
+<!-- Modal de Vitória -->
+<div id="winModal" class="fixed inset-0 z-50 hidden items-center justify-center modal-backdrop p-4">
+  <div class="modal-card rounded-2xl max-w-md w-full p-6 sm:p-8 text-center relative">
+    <div class="absolute -top-4 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-emerald-500 text-slate-900 text-xs font-bold mono tracking-widest uppercase">VITÓRIA</div>
+    <div class="text-6xl mb-3">🏆</div>
+    <h2 class="text-2xl sm:text-3xl font-extrabold text-white mb-2">Parabéns, Arquiteto!</h2>
+    <p class="text-slate-300 text-sm sm:text-base mb-5">Você conectou todos os conceitos da <span class="text-cyan-300 font-semibold">Arquitetura Canvas</span>. Memória afiada!</p>
+
+    <div class="grid grid-cols-3 gap-2 mb-6">
+      <div class="stat-pill p-3">
+        <div class="text-[10px] uppercase tracking-wider text-slate-400 mono">Tempo</div>
+        <div id="finalTime" class="stat-value text-lg font-bold text-cyan-300 mt-1">00:00</div>
+      </div>
+      <div class="stat-pill p-3">
+        <div class="text-[10px] uppercase tracking-wider text-slate-400 mono">Tentativas</div>
+        <div id="finalAttempts" class="stat-value text-lg font-bold text-white mt-1">0</div>
+      </div>
+      <div class="stat-pill p-3">
+        <div class="text-[10px] uppercase tracking-wider text-slate-400 mono">Eficiência</div>
+        <div id="finalEfficiency" class="stat-value text-lg font-bold text-emerald-400 mt-1">100%</div>
+      </div>
+    </div>
+
+    <div class="flex gap-3">
+      <button id="modalCloseBtn" class="flex-1 px-4 py-3 rounded-xl border border-slate-600 text-slate-200 hover:bg-slate-700/50 transition font-semibold text-sm">Fechar</button>
+      <button id="modalRestartBtn" class="btn-primary flex-1 px-4 py-3 rounded-xl text-sm">Jogar Novamente</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ====== Configuração do jogo ======
+  const TERMS = [
+    'Core Layer',
+    'End-User',
+    'Foundation',
+    'Server Action',
+    'Entity',
+    'REST API',
+    'Style Guide',
+    'JSON',
+    'Dependência',
+    'Arquitetura'
+  ];
+
+  const HINT_MESSAGES = {
+    'Core Layer':       'Camada central onde moram os processos e regras de negócio principais.',
+    'End-User':         'Quem realmente usa a aplicação no dia a dia — o destino final da entrega.',
+    'Foundation':       'Base técnica compartilhada: módulos, bibliotecas e padrões reutilizáveis.',
+    'Server Action':    'Lógica executada no servidor, disparada por um botão ou evento de tela.',
+    'Entity':           'Modelo de dados persistente — geralmente vira uma tabela no banco.',
+    'REST API':         'Contrato de integração entre sistemas via HTTP (GET, POST, PUT, DELETE).',
+    'Style Guide':      'Padrões visuais e de UI que garantem consistência entre telas.',
+    'JSON':             'Formato leve de troca de dados em pares chave-valor.',
+    'Dependência':      'Relação "A precisa de B" — o calcanhar de Aquiles da manutenção.',
+    'Arquitetura':      'Decisões estruturais difíceis de mudurar depois — o esqueleto do sistema.'
+  };
+
+  // ====== Estado do jogo ======
+  const state = {
+    cards: [],          // array de {id, term, matched}
+    flipped: [],        // índices atualmente virados (não matched)
+    lock: false,        // trava para evitar cliques durante checagem
+    started: false,
+    matchedCount: 0,
+    attempts: 0,
+    hintsLeft: 3,
+    startTime: null,
+    timerInterval: null,
+    elapsed: 0
+  };
+
+  // ====== DOM ======
+  const board = document.getElementById('board');
+  const timerEl = document.getElementById('timer');
+  const attemptsEl = document.getElementById('attempts');
+  const pairsEl = document.getElementById('pairsFound');
+  const hintsLeftEl = document.getElementById('hintsLeft');
+  const startBtn = document.getElementById('startBtn');
+  const startBtnLabel = document.getElementById('startBtnLabel');
+  const hintBtn = document.getElementById('hintBtn');
+  const hintBanner = document.getElementById('hintBanner');
+  const hintText = document.getElementById('hintText');
+  const winModal = document.getElementById('winModal');
+  const finalTime = document.getElementById('finalTime');
+  const finalAttempts = document.getElementById('finalAttempts');
+  const finalEfficiency = document.getElementById('finalEfficiency');
+  const modalCloseBtn = document.getElementById('modalCloseBtn');
+  const modalRestartBtn = document.getElementById('modalRestartBtn');
+  const toast = document.getElementById('toast');
+
+  // ====== Utilidades ======
+  function shuffle(arr) {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+
+  function formatTime(sec) {
+    const m = String(Math.floor(sec / 60)).padStart(2, '0');
+    const s = String(sec % 60).padStart(2, '0');
+    return `${m}:${s}`;
+  }
+
+  function showToast(msg, duration = 2200) {
+    toast.textContent = msg;
+    toast.classList.remove('hide');
+    toast.classList.add('show');
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => {
+      toast.classList.remove('show');
+      toast.classList.add('hide');
+    }, duration);
+  }
+
+  // ====== Construção do tabuleiro ======
+  function buildDeck() {
+    // Cada termo aparece 2 vezes
+    const deck = [];
+    TERMS.forEach((term, idx) => {
+      deck.push({ id: `${term}-a`, pairId: idx, term, matched: false });
+      deck.push({ id: `${term}-b`, pairId: idx, term, matched: false });
+    });
+    return shuffle(deck);
+  }
+
+  function renderBoard() {
+    board.innerHTML = '';
+    state.cards.forEach((card, idx) => {
+      const el = document.createElement('div');
+      el.className = 'card';
+      el.dataset.index = idx;
+      el.style.animationDelay = (idx * 35) + 'ms';
+      el.setAttribute('role', 'button');
+      el.setAttribute('tabindex', '0');
+      el.setAttribute('aria-label', 'Carta de memória — clique para revelar');
+
+      el.innerHTML = `
+        <div class="card-inner">
+          <div class="card-face card-back">
+            <div class="logo">&lt;<span>/</span>&gt;</div>
+          </div>
+          <div class="card-face card-front">
+            <div class="tag">arch • concept</div>
+            <div class="term">${card.term}</div>
+          </div>
+        </div>
+      `;
+
+      el.addEventListener('click', () => onCardClick(idx));
+      el.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onCardClick(idx);
+        }
+      });
+
+      board.appendChild(el);
+    });
+  }
+
+  // ====== Lógica de clique ======
+  function onCardClick(idx) {
+    if (!state.started) {
+      showToast('Clique em "Iniciar Jogo" para começar!');
+      return;
+    }
+    if (state.lock) return;
+    const card = state.cards[idx];
+    if (card.matched) return;
+    if (state.flipped.includes(idx)) return;
+
+    const cardEl = board.children[idx];
+    cardEl.classList.add('flipped');
+    state.flipped.push(idx);
+
+    if (state.flipped.length === 2) {
+      state.attempts += 1;
+      updateStats();
+      checkMatch();
+    }
+  }
+
+  function checkMatch() {
+    const [i1, i2] = state.flipped;
+    const c1 = state.cards[i1];
+    const c2 = state.cards[i2];
+    const el1 = board.children[i1];
+    const el2 = board.children[i2];
+
+    if (c1.pairId === c2.pairId) {
+      // Match!
+      state.lock = true;
+      setTimeout(() => {
+        c1.matched = true;
+        c2.matched = true;
+        el1.classList.add('matched');
+        el2.classList.add('matched');
+        el1.classList.remove('flipped');
+        el2.classList.remove('flipped');
+        state.matchedCount += 1;
+        state.flipped = [];
+        state.lock = false;
+        updateStats();
+        if (state.matchedCount === TERMS.length) {
+          finishGame();
+        } else {
+          showToast(`✓ Par encontrado: ${c1.term}`, 1600);
+        }
+      }, 380);
+    } else {
+      // Sem match — manter visível por 1s e desvirar
+      state.lock = true;
+      el1.classList.add('shake');
+      el2.classList.add('shake');
+      setTimeout(() => {
+        el1.classList.remove('shake');
+        el2.classList.remove('shake');
+        el1.classList.remove('flipped');
+        el2.classList.remove('flipped');
+        state.flipped = [];
+        state.lock = false;
+      }, 1000);
+    }
+  }
+
+  // ====== Estatísticas ======
+  function updateStats() {
+    attemptsEl.textContent = state.attempts;
+    pairsEl.textContent = state.matchedCount;
+    hintsLeftEl.textContent = state.hintsLeft;
+  }
+
+  // ====== Cronômetro ======
+  function startTimer() {
+    state.startTime = Date.now();
+    state.elapsed = 0;
+    timerEl.textContent = '00:00';
+    state.timerInterval = setInterval(() => {
+      state.elapsed = Math.floor((Date.now() - state.startTime) / 1000);
+      timerEl.textContent = formatTime(state.elapsed);
+    }, 500);
+  }
+
+  function stopTimer() {
+    if (state.timerInterval) {
+      clearInterval(state.timerInterval);
+      state.timerInterval = null;
+    }
+  }
+
+  // ====== Início / Reinício ======
+  function startGame() {
+    stopTimer();
+    state.cards = buildDeck();
+    state.flipped = [];
+    state.lock = false;
+    state.matchedCount = 0;
+    state.attempts = 0;
+    state.hintsLeft = 3;
+    state.started = true;
+    state.elapsed = 0;
+
+    renderBoard();
+    updateStats();
+    timerEl.textContent = '00:00';
+    startTimer();
+
+    startBtnLabel.textContent = 'Reiniciar';
+    hintBtn.disabled = false;
+    hideHintBanner();
+    showToast('Jogo iniciado! Boa sorte, arquiteto. 🚀', 2000);
+  }
+
+  // ====== Dica Relâmpago ======
+  function useHint() {
+    if (!state.started || state.hintsLeft <= 0 || state.lock) return;
+
+    // Pares ainda não encontrados
+    const unmatchedByPair = {};
+    state.cards.forEach((card, idx) => {
+      if (!card.matched) {
+        if (!unmatchedByPair[card.pairId]) unmatchedByPair[card.pairId] = [];
+        unmatchedByPair[card.pairId].push(idx);
+      }
+    });
+
+    const completePairs = Object.values(unmatchedByPair).filter(arr => arr.length === 2);
+    if (completePairs.length === 0) {
+      showToast('Não há pares suficientes para revelar.');
+      return;
+    }
+
+    // Escolhe 2 pares completos (ou 1 se só houver 1)
+    const picked = shuffle(completePairs).slice(0, Math.min(2, completePairs.length));
+    const indicesToReveal = picked.flat();
+
+    state.hintsLeft -= 1;
+    updateStats();
+    hintBtn.disabled = state.hintsLeft <= 0;
+
+    // Pisca as cartas
+    indicesToReveal.forEach(i => {
+      const el = board.children[i];
+      el.classList.add('hinted');
+      // Remove flip residual caso esteja virado por clique
+      el.classList.remove('flipped');
+    });
+
+    // Mostra banner com pista textual de um dos pares revelados
+    const firstPairId = state.cards[indicesToReveal[0]].pairId;
+    const firstTerm = state.cards[indicesToReveal[0]].term;
+    hintText.textContent = `${firstTerm} — ${HINT_MESSAGES[firstTerm] || 'conceito-chave da arquitetura.'}`;
+    hintBanner.classList.remove('hidden-banner');
+
+    // Após 3 segundos, esconde
+    setTimeout(() => {
+      indicesToReveal.forEach(i => {
+        const el = board.children[i];
+        // Só remove hinted se ainda não foi matched
+        if (!state.cards[i].matched) {
+          el.classList.remove('hinted');
+        }
+      });
+      hideHintBanner();
+    }, 3000);
+
+    showToast(`Dica ativada! ${state.hintsLeft} restante(s).`, 2000);
+  }
+
+  function hideHintBanner() {
+    hintBanner.classList.add('hidden-banner');
+  }
+
+  // ====== Fim de jogo ======
+  function finishGame() {
+    stopTimer();
+    finalTime.textContent = formatTime(state.elapsed);
+    finalAttempts.textContent = state.attempts;
+    // Eficiência: 10 pares / tentativas. 100% se 10 tentativas.
+    const eff = state.attempts > 0 ? Math.round((10 / state.attempts) * 100) : 100;
+    finalEfficiency.textContent = eff + '%';
+
+    // Mostra modal
+    setTimeout(() => {
+      winModal.classList.remove('hidden');
+      winModal.classList.add('flex');
+      launchConfetti();
+    }, 500);
+  }
+
+  function closeModal() {
+    winModal.classList.add('hidden');
+    winModal.classList.remove('flex');
+  }
+
+  // ====== Confete ======
+  function launchConfetti() {
+    const colors = ['#22d3ee', '#34d399', '#3b82f6', '#fbbf24', '#f472b6', '#e2e8f0'];
+    const total = 80;
+    for (let i = 0; i < total; i++) {
+      const c = document.createElement('div');
+      c.className = 'confetti';
+      c.style.left = Math.random() * 100 + 'vw';
+      c.style.background = colors[Math.floor(Math.random() * colors.length)];
+      const duration = 2.5 + Math.random() * 2.5;
+      const delay = Math.random() * 1.2;
+      c.style.animation = `fall ${duration}s linear ${delay}s forwards`;
+      c.style.width = (6 + Math.random() * 8) + 'px';
+      c.style.height = (10 + Math.random() * 10) + 'px';
+      document.body.appendChild(c);
+      setTimeout(() => c.remove(), (duration + delay) * 1000 + 200);
+    }
+  }
+
+  // ====== Eventos ======
+  startBtn.addEventListener('click', startGame);
+  hintBtn.addEventListener('click', useHint);
+  modalCloseBtn.addEventListener('click', closeModal);
+  modalRestartBtn.addEventListener('click', () => {
+    closeModal();
+    startGame();
+  });
+
+  // Permite fechar modal com Esc
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !winModal.classList.contains('hidden')) {
+      closeModal();
+    }
+  });
+
+  // ====== Estado inicial: monta tabuleiro "preview" (não jogável até Iniciar) ======
+  state.cards = buildDeck();
+  renderBoard();
+  updateStats();
+})();
+</script>
+</body>
+</html>
